@@ -61,6 +61,12 @@ of late 2025.
 
 ## Examples
 
+Community usage:
+
+- [**autoresearch-webgpu**: autoresesarch, in the browser](https://autoresearch.lucasgelfond.online/)
+- [**tanh.xyz**: Interactive ML visualizations](https://tanh.xyz/)
+- [**jax-js-bayes**: Declarative Bayesian modeling library](https://github.com/StefanSko/jax-js-bayes)
+
 Demos on the jax-js website:
 
 - [Training neural networks on MNIST](https://jax-js.com/mnist)
@@ -71,10 +77,6 @@ Demos on the jax-js website:
 - [Matmul benchmark](https://jax-js.com/bench/matmul)
 - [Conv2d benchmark](https://jax-js.com/bench/conv2d)
 - [Mandelbrot set](https://jax-js.com/mandelbrot)
-
-And some cool things made by the community:
-
-- [**tanh.xyz**: Interactive ML visualizations](https://tanh.xyz/)
 
 ## Feature comparison
 
