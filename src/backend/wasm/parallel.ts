@@ -79,6 +79,23 @@ export class WasmWorkerPool {
     });
   }
 
+  // FORK PATCH (jaxjlys): terminate all spawned workers and release
+  // references they hold to the shared `WebAssembly.Memory`. Called by
+  // `WasmBackend.destroy()` during `resetBackend("wasm")`. Idempotent:
+  // a second call is a no-op because the workers array is cleared.
+  /**
+   * Terminate all spawned workers and release their references.
+   *
+   * After `destroy()` returns, this pool cannot be reused.
+   */
+  destroy(): void {
+    for (const worker of this.#workers) {
+      worker.terminate();
+    }
+    this.#workers = [];
+    this.#hooks.clear();
+  }
+
   #ensureInit() {
     if (this.#workers.length > 0) return;
     // Called lazily to avoid creating workers if not used.

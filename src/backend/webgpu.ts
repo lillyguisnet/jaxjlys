@@ -267,6 +267,21 @@ export class WebGPUBackend implements Backend {
     });
     return buffer;
   }
+
+  // FORK PATCH (jaxjlys): mandatory Backend.destroy() implementation.
+  //
+  // `GPUDevice.destroy()` is the WebGPU spec's teardown hook — it invalidates
+  // all child resources (buffers, pipelines, bind groups, textures) created
+  // from the device, so we don't need to walk them individually. We still
+  // clear the JS-side maps so any lingering `Slot` from the old backend
+  // fails fast with `SlotError` instead of dereferencing a now-destroyed
+  // `GPUBuffer`. Idempotent: calling destroy() twice is a no-op because
+  // `GPUDevice.destroy()` is itself idempotent and the maps are already empty.
+  async destroy(): Promise<void> {
+    this.buffers.clear();
+    this.#cachedShaderMap.clear();
+    this.device.destroy();
+  }
 }
 
 /**

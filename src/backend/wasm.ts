@@ -674,6 +674,26 @@ export class WasmBackend implements Backend {
     if (!buffer) throw new SlotError(slot);
     return new Uint8Array(this.#memory.buffer, buffer.ptr, buffer.size);
   }
+
+  // FORK PATCH (jaxjlys): release external resources on backend reset.
+  //
+  // The worker pool owns `navigator.hardwareConcurrency` spawned workers,
+  // each holding a reference to the shared `WebAssembly.Memory`. Without an
+  // explicit `terminate()` those workers and their memory references leak
+  // across a `resetBackend("wasm")` call, defeating the whole purpose of
+  // the reset. Buffer and pending-work maps are cleared so that any lingering
+  // `Slot` from the old backend fails fast with `SlotError` rather than
+  // silently reading stale pointers. The `WebAssembly.Memory` itself is
+  // reclaimed by the garbage collector once this backend is no longer
+  // referenced from `initializedBackends` (handled by `resetBackend()`).
+  async destroy(): Promise<void> {
+    if (this.#workerPool) {
+      this.#workerPool.destroy();
+      this.#workerPool = null;
+    }
+    this.#buffers.clear();
+    this.#pendingWork.clear();
+  }
 }
 
 /** Emit a runtime guard: enter the if-block only when [begin, end) is SIMD-aligned. */

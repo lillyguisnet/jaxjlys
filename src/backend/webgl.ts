@@ -344,6 +344,30 @@ export class WebGLBackend implements Backend {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.useProgram(null);
   }
+
+  // FORK PATCH (jaxjlys): mandatory Backend.destroy() implementation.
+  //
+  // Unlike WebGPU's single `GPUDevice.destroy()` call, WebGL has no top-level
+  // teardown — we must individually delete every textures, program, and
+  // framebuffer we created. Then we force a context loss so the driver
+  // releases the GPU-side resources backing them. Idempotent: the maps are
+  // cleared on first call so a second call finds nothing to delete; the
+  // WEBGL_lose_context extension is itself safe to call multiple times.
+  async destroy(): Promise<void> {
+    const gl = this.gl;
+    for (const { texture } of this.#buffers.values()) {
+      gl.deleteTexture(texture);
+    }
+    this.#buffers.clear();
+    for (const { program } of this.#programCache.values()) {
+      gl.deleteProgram(program);
+    }
+    this.#programCache.clear();
+    gl.deleteFramebuffer(this.#fbo);
+    // Tell the driver to release GPU-side state. Without this the underlying
+    // context can linger until the OffscreenCanvas is GC'd.
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+  }
 }
 
 function generateShader(kernel: Kernel): ShaderInfo {

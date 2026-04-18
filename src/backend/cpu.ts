@@ -138,4 +138,14 @@ export class CpuBackend implements Backend {
     if (!buffer) throw new SlotError(slot);
     return buffer.buffer;
   }
+
+  // FORK PATCH (jaxjlys): mandatory Backend.destroy() implementation.
+  //
+  // CpuBackend holds no external resources — all buffers are plain JS
+  // typed arrays that the garbage collector can reclaim on its own. We
+  // still clear the map so any post-destroy use of stale slots fails fast
+  // with `SlotError` rather than appearing to succeed on a dead backend.
+  async destroy(): Promise<void> {
+    this.#buffers.clear();
+  }
 }

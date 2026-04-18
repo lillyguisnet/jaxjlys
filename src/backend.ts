@@ -68,6 +68,54 @@ export async function init(...devicesToInit: Device[]): Promise<Device[]> {
   return Array.from(initializedBackends.keys());
 }
 
+// FORK PATCH (jaxjlys): public backend-reset API.
+//
+// Motivation: long-running workloads on the WASM backend accumulate state in
+// the `WasmAllocator`'s bump pointer. Even after the signed-shift bug was
+// fixed and the ceiling moved from ~2 GiB back to the spec-defined 4 GiB,
+// workloads like SAM 2.1 Hiera-L that repeatedly allocate many-hundreds-of-MiB
+// attention matrices can still climb toward that ceiling over the course of
+// inference. Before this API existed, consumers had to reach into the module-
+// private `initializedBackends` Map via `Map.prototype.has` monkey-patches to
+// force `init()` to re-create a backend. That was fragile and non-portable.
+//
+// `resetBackend(device)` is the supported path: it tears down the current
+// backend instance for `device` (releasing workers, GPU device, textures,
+// etc.) and then re-runs `init(device)` to build a fresh one. The module-
+// private state stays private; callers interact only with the public API.
+//
+// See FORK_NOTES.md §"Known issues we intend to patch" for context.
+/**
+ * Release and re-create the backend for a device.
+ *
+ * All external resources held by the existing backend instance are released
+ * (WASM worker threads are terminated, GPU devices destroyed, textures and
+ * compiled pipelines deleted, etc). A fresh backend of the same type is then
+ * constructed via the normal `init()` path.
+ *
+ * **Warning: all `Array` objects, `Slot`s, `Executable`s, compiled kernels,
+ * and JIT-cached programs that reference the old backend become invalid.**
+ * The caller must copy any live data back to JS (via `array.data()`, or
+ * equivalently `blockUntilReady()` + `read()` on the backend) _before_
+ * calling `resetBackend()`, and re-upload it afterwards if needed.
+ *
+ * The `defaultDevice` setting is preserved across reset (it's stored as a
+ * string, not a backend reference). If `device` was the default and the
+ * re-creation fails (e.g. WebGPU adapter request fails after reset),
+ * `defaultDevice()` will subsequently throw on next use.
+ *
+ * Returns the same shape as `init()`: the list of currently available
+ * backends.
+ */
+export async function resetBackend(device: Device): Promise<Device[]> {
+  const existing = initializedBackends.get(device);
+  if (existing) {
+    initializedBackends.delete(device);
+    await existing.destroy();
+  }
+  return init(device);
+}
+
 /** Create a backend, if available. Internal function called by `init()`. */
 async function createBackend(device: Device): Promise<Backend | null> {
   if (device === "cpu") {
@@ -204,6 +252,23 @@ export interface Backend {
    * on that slot to finish.
    */
   dispatch(exe: Executable, inputs: Slot[], outputs: Slot[]): void;
+
+  // FORK PATCH (jaxjlys): mandatory teardown hook.
+  //
+  // Every backend holds external resources that the garbage collector cannot
+  // reclaim on its own (web workers, GPU devices, textures, compiled pipelines).
+  // `destroy()` releases those resources synchronously from the host's point
+  // of view; the returned promise resolves once any async teardown has finished.
+  //
+  // Used by `resetBackend()`. Implementations should be idempotent: calling
+  // `destroy()` twice must not throw. After `destroy()` returns, invoking any
+  // other method on the backend is undefined behaviour.
+  /**
+   * Release external resources held by this backend.
+   *
+   * See `resetBackend()` for typical usage.
+   */
+  destroy(): Promise<void>;
 }
 
 export class Executable<T = any> {

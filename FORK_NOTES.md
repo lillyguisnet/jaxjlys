@@ -64,6 +64,73 @@ the relevant entry below.
 
 ### Applied
 
+#### 2. Public backend-reset API: `Backend.destroy()` + `resetBackend(device)` — **added**
+
+**Files:**
+
+- `src/backend.ts` — added `Backend.destroy()` to the interface, added `resetBackend()` export.
+- `src/backend/wasm.ts` — `WasmBackend.destroy()` terminates the worker pool and clears buffer state.
+- `src/backend/wasm/parallel.ts` — `WasmWorkerPool.destroy()` terminates all spawned workers.
+- `src/backend/cpu.ts`, `src/backend/webgpu.ts`, `src/backend/webgl.ts` — `destroy()` implementations.
+- `src/index.ts` — re-exports `resetBackend`.
+
+**What was wrong.** `jax.init(device)` is intentionally idempotent: it no-ops
+when a backend for `device` already exists in the module-private
+`initializedBackends` Map. That's the right semantics for startup, but it
+leaves **no public way** to ask "please recreate the backend from scratch".
+Consumers needing a fresh `WasmAllocator` (e.g. when long-running inference
+causes the bump pointer to climb toward the WASM32 ceiling) were forced to
+reach into module-private state by, for example, monkey-patching
+`Map.prototype.has` so that `init()` treats the device as uninitialised and
+constructs a new backend over the top.
+
+That monkey-patch is fragile and non-portable across projects, so this fork
+adds a supported API instead.
+
+**Fix.**
+
+1. `Backend.destroy(): Promise<void>` is now part of the `Backend` interface.
+   Every backend implements it and releases its external resources:
+
+   - **WasmBackend** terminates its worker pool (each worker held a reference
+     to the shared `WebAssembly.Memory`) and clears the buffer / pending-work
+     maps so stale `Slot`s fail fast with `SlotError`.
+   - **WasmWorkerPool** calls `worker.terminate()` on every spawned worker.
+   - **WebGPUBackend** calls `GPUDevice.destroy()` (the spec's teardown hook,
+     which invalidates all buffers/pipelines/bind groups created from it) and
+     clears the JS-side maps.
+   - **WebGLBackend** individually deletes textures, programs, and the
+     framebuffer, then calls `WEBGL_lose_context.loseContext()` to release
+     GPU state.
+   - **CpuBackend** clears the buffers map (no external resources to release,
+     but fail-fast behaviour for stale slots stays consistent).
+
+   All implementations are idempotent: a second `destroy()` call is a no-op.
+
+2. `resetBackend(device: Device): Promise<Device[]>` destroys the existing
+   instance (if any) and re-runs `init(device)` to construct a fresh one.
+   Returns the same shape as `init()`.
+
+**Semantics documented in the JSDoc.** The key contract: after
+`resetBackend()`, all `Array`s, `Slot`s, `Executable`s, and JIT-cached
+programs from the old backend are invalid. Callers must read data back to
+JS before reset and re-upload afterwards. `defaultDevice()` is preserved
+(it's a string, not a backend reference).
+
+**Consumer impact.** Downstream code can now replace any `Map.prototype.has`
+monkey-patching with:
+
+```js
+await jax.resetBackend("wasm");
+```
+
+See `webtwardis/jaxjs-sam2-poc.html` for the motivating usage.
+
+**Status.** Applied. Look for `// FORK PATCH (jaxjlys):` markers in the
+source files listed above.
+
+---
+
 #### 1. `WasmAllocator#bumpAlloc` signed-shift memory-grow bug — **fixed**
 
 **File:** `src/backend/wasm/allocator.ts`, inside `#bumpAlloc` (bundled to `dist/backend-*.js`).

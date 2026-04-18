@@ -6,6 +6,8 @@ import {
   getBackend,
   getWebGPUDevice,
   init,
+  // FORK PATCH (jaxjlys): public backend-reset API. See FORK_NOTES.md.
+  resetBackend,
 } from "./backend";
 import { Array, ArrayLike } from "./frontend/array";
 import * as jaxprModule from "./frontend/jaxpr";
@@ -42,6 +44,8 @@ export {
   type OwnedFunction,
   getWebGPUDevice,
   random,
+  // FORK PATCH (jaxjlys): public backend-reset API. See FORK_NOTES.md.
+  resetBackend,
   setDebug,
   scipySpecial,
   tree,
