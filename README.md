@@ -1,3 +1,10 @@
+> ⚠️ **This is a fork of [`ekzhang/jax-js`](https://github.com/ekzhang/jax-js).**
+> Before making any change here, read **[`FORK_NOTES.md`](./FORK_NOTES.md)** — it
+> explains what we patch, why, and how to keep the fork in sync with upstream.
+> The rest of this README is the unmodified upstream documentation.
+
+---
+
 <h1 align="center">jax-js: JAX in pure JavaScript</h1>
 
 <p align="center"><strong>
