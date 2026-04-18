@@ -51,8 +51,19 @@ export class WasmAllocator {
     if (ptr + size > this.#memory.buffer.byteLength) {
       // Note: 4 GiB = max memory32 size
       // https://spidermonkey.dev/blog/2025/01/15/is-memory64-actually-worth-using.html
+      //
+      // FORK PATCH (jaxjlys): use unsigned right shift `>>>` instead of signed `>>`.
+      // With `>>`, JS first coerces the operand to a signed int32. Once
+      // `ptr + size + 65535` crosses 2^31 (~2.15 GiB), the value wraps to a
+      // negative int32 and the resulting page delta becomes negative, causing
+      // `WebAssembly.Memory.grow()` to throw "Argument 0 must be non-negative".
+      // This effectively capped the allocator at ~2 GiB instead of the 4 GiB
+      // advertised by the WASM32 memory spec. `>>>` keeps the value in the
+      // unsigned 32-bit domain, giving correct page counts up to 4 GiB.
+      // See FORK_NOTES.md §"Known issues we intend to patch" for the full story
+      // (the SAM 2.1 Hiera-L encoder in webtwardis is the motivating consumer).
       this.#memory.grow(
-        ((ptr + size + 65535) >> 16) - (this.#memory.buffer.byteLength >> 16),
+        ((ptr + size + 65535) >>> 16) - (this.#memory.buffer.byteLength >>> 16),
       );
     }
     return ptr;

@@ -57,17 +57,19 @@ re-applying the fix on top of any upstream refactor.
 
 ## Known issues we intend to patch
 
-**None applied yet** — this document currently describes only the
-_planned_ changes. When a patch actually lands, move its entry from the
-"planned" list to the "applied" list and link to the commit.
+Every patch is tagged in-source with a comment that starts with
+`// FORK PATCH (jaxjlys):` so future `git merge upstream/main` surfaces the
+change. When adding a new patch, keep that convention and cross-reference
+the relevant entry below.
 
-### Planned
+### Applied
 
-#### 1. `WasmAllocator#bumpAlloc` signed-shift memory-grow bug
+#### 1. `WasmAllocator#bumpAlloc` signed-shift memory-grow bug — **fixed**
 
-**File:** `src/backend/wasm/allocator.ts`, lines 52–56 (bundled to `dist/backend-*.js` line 2696).
+**File:** `src/backend/wasm/allocator.ts`, inside `#bumpAlloc` (bundled to `dist/backend-*.js`).
 
-**Current code:**
+**What was wrong.** The original code computed the WASM-page delta for
+`WebAssembly.Memory.grow()` using signed right shift `>>`:
 
 ```ts
 this.#memory.grow(
@@ -75,41 +77,52 @@ this.#memory.grow(
 );
 ```
 
-**Bug.** `>>` is a _signed_ right shift that converts its operand to an
-`int32` first. When the bump pointer plus a new allocation exceeds
-`2^31 - 1` ≈ **2.15 GiB**, `ptr + size + 65535` overflows into the negative
-half of `int32`, and the page count passed to `WebAssembly.Memory.grow()`
-becomes negative. Chromium then throws:
+`>>` first coerces its operand to an `int32`. Once `ptr + size + 65535`
+crosses `2^31` (~2.15 GiB), the value wraps to a negative int32, the
+shift sign-extends, and the delta passed to `grow()` becomes negative.
+Chromium then throws:
 
 ```
 TypeError: WebAssembly.Memory.grow(): Argument 0 must be non-negative
 ```
 
-**Why it matters for us.** SAM 2.1's Hiera-Large encoder at stage 2 performs
-global self-attention over 4096 tokens, allocating a ~512 MiB attention matrix
-plus similarly sized softmax intermediates. Even with aggressive inter-block
-cleanup, the bump pointer climbs past 2 GiB well before the theoretical 4 GiB
-ceiling, crashing inference mid-encoder.
+Effective consequence: the allocator capped at ~2 GiB instead of the 4 GiB
+advertised by the WASM32 memory spec.
 
-**Planned fix.** Replace both `>> 16` with `>>> 16` (unsigned right shift):
+**Why it mattered for us.** SAM 2.1's Hiera-Large encoder (stage 2) runs
+global self-attention over 4096 tokens. `nn.dotProductAttention` allocates
+~512 MiB for the attention matrix plus similarly sized softmax intermediates.
+Even with aggressive inter-block cleanup in the consumer, the bump pointer
+climbed past 2 GiB part-way through the 36-block stage and crashed inference
+mid-encoder. Motivating consumer: `webtwardis/jaxjs-sam2-poc.html`.
+
+**Fix.** Replace `>>` with `>>>` (unsigned right shift) on both operands:
 
 ```ts
 this.#memory.grow(
-  (((ptr + size + 65535) >>> 16) - (this.#memory.buffer.byteLength >>> 16)),
+  ((ptr + size + 65535) >>> 16) - (this.#memory.buffer.byteLength >>> 16),
 );
 ```
 
-`>>>` keeps the operand in the unsigned 32-bit domain, so values up to
-`2^32 - 1` ≈ 4 GiB are represented correctly. This fixes the crash without
-changing behavior for allocations below 2 GiB.
+`>>>` keeps the value in the unsigned 32-bit domain, so page counts up to
+`2^32 / 65536 = 65536` (= 4 GiB) are represented correctly. Behaviour is
+unchanged for allocations below 2 GiB.
 
-**Status.** Not applied yet (parent project wants to work on its own
-SAM2-side fixes first). See `webtwardis/jaxjs-sam2-poc.html` for the
-consumer that will benefit.
+**Artefact.** Because this touches a file that ends up in a rolldown
+code-split chunk, the hashed chunk filename in `dist/` changes with the
+patch (upstream built `backend-DZvR7mZV.js`; our build produces a different
+hash — e.g. `backend-CyFPPI98.js` at the time of writing). Consumers who
+import the chunk **by hash directly** (e.g. for backend monkey-patching)
+must either update the hardcoded filename or discover it at runtime by
+parsing `dist/index.js`. `webtwardis/jaxjs-sam2-poc.html` does the latter.
 
-### Applied
+**Status.** Applied. See the `// FORK PATCH (jaxjlys):` comment in
+`src/backend/wasm/allocator.ts` for the in-source marker, and
+`git log src/backend/wasm/allocator.ts` for the commit history.
 
-_(empty — no patches merged yet)_
+### Planned
+
+_(empty — no further patches pending at this time)_
 
 ## Building
 
