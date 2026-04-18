@@ -260,6 +260,24 @@ type JitValue =
 
 const jitCompileCache = new Map<string, JitProgram>();
 
+// FORK PATCH (jaxjlys): Purge JIT cache entries that reference a given backend.
+//
+// Called by `resetBackend()` after a backend is destroyed. Without this,
+// cached JitProgram instances keep a reference to the old (destroyed) backend
+// and crash on reuse with errors like
+//     "Used a buffer that is invalid or already freed: <slot>"
+// because their internal `this.backend.incRef(slot)` / `.malloc()` calls
+// operate on slot numbers from the old backend that no longer exist.
+//
+// Clearing by instance identity (not by type string) is intentional: two
+// backends of the same type can co-exist briefly during reset. The type-based
+// cache key is an optimization that assumes a single instance per type.
+export function purgeJitCacheForBackend(backend: Backend): void {
+  for (const [key, prog] of jitCompileCache) {
+    if (prog.backend === backend) jitCompileCache.delete(key);
+  }
+}
+
 export function jitCompile(backend: Backend, jaxpr: Jaxpr): JitProgram {
   const cacheKey = backend.type + "," + FpHash.hash(jaxpr);
 

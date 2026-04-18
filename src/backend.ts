@@ -111,6 +111,11 @@ export async function resetBackend(device: Device): Promise<Device[]> {
   const existing = initializedBackends.get(device);
   if (existing) {
     initializedBackends.delete(device);
+    // FORK PATCH (jaxjlys): purge JIT cache entries that reference this backend
+    // BEFORE destroying it, so no stale compiled program can be reused with
+    // dangling backend slots. See purgeJitCacheForBackend() in frontend/jit.ts.
+    const { purgeJitCacheForBackend } = await import("./frontend/jit");
+    purgeJitCacheForBackend(existing);
     await existing.destroy();
   }
   return init(device);
